@@ -18,13 +18,16 @@
 # Lines starting with # are comments
 # ==============================================================================
 
-templar
-0.0.1
+ nonsens
+ 0.0.1
 
 [lib]
-echo|https://github.com/bresilla/echo.git|0.0.25
-scan|https://github.com/bresilla/scan.git|0.0.10
-datapod|https://github.com/robolibs/datapod.git|0.0.41
+ echo|https://github.com/bresilla/echo.git|0.0.25
+ scan|https://github.com/bresilla/scan.git|0.0.11
+ datapod|https://github.com/robolibs/datapod.git|0.0.51
+ optinum|https://github.com/robolibs/optinum.git|0.0.18
+ wirebit|https://github.com/robolibs/wirebit.git|0.0.11
+ netpipe|https://github.com/robolibs/netpipe.git|0.0.16
 
 [example]
 # pkg::rerun_sdk
