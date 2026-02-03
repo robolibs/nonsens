@@ -34,7 +34,7 @@ namespace nonsens::codec::gnss {
             std::time_t t = std::time(nullptr);
             std::tm utc_tm;
             gmtime_r(&t, &utc_tm);
-            char buf[8];
+            char buf[32];
             std::snprintf(buf, sizeof(buf), "%02d%02d%02d", utc_tm.tm_mday, utc_tm.tm_mon + 1, (utc_tm.tm_year % 100));
             return std::string(buf);
         }
@@ -43,7 +43,7 @@ namespace nonsens::codec::gnss {
             std::time_t t = std::time(nullptr);
             std::tm utc_tm;
             gmtime_r(&t, &utc_tm);
-            char buf[16];
+            char buf[32];
             std::snprintf(buf, sizeof(buf), "%02d:%02d:%04d", utc_tm.tm_mday, utc_tm.tm_mon + 1, utc_tm.tm_year + 1900);
             return std::string(buf);
         }
