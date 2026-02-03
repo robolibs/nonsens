@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.0.7] - 2026-02-03
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Prevent buffer overflows in date/time formatting
+
 ## [0.0.4] - 2026-02-03
 
 ### <!-- 0 -->⛰️  Features
