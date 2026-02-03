@@ -17,15 +17,19 @@ int main() {
     std::cout << "GNSS PTY slave: " << link->slave_path().c_str() << "\n";
     std::cout << "Write NMEA to it; program will echo flatsim-style burst back.\n";
 
-    nonsens::sensor::Gnss gnss;
-    gnss.add_input(serial);
-    gnss.add_output(serial);
+    auto sres = nonsens::sensor::Sensor::create(nonsens::sensor::SensorType::GNSS);
+    if (!sres.is_ok()) {
+        std::cerr << "failed to create sensor: " << sres.error().message.c_str() << "\n";
+        return 1;
+    }
+    auto sensor = std::move(sres.value());
+
+    sensor.add_input(nonsens::sensor::Endpoint{&serial});
+    sensor.add_output(nonsens::sensor::Endpoint{&serial});
 
     while (true) {
-        gnss.step();
-
-        // Push periodically. This keeps the example simple.
-        gnss.push();
+        sensor.step();
+        sensor.push();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }

@@ -1,34 +1,150 @@
 #pragma once
 
+#include <type_traits>
+
 #include <datapod/datapod.hpp>
+
+#include <wirebit/wirebit.hpp>
+
+#include <nonsens/pods/camera.hpp>
+#include <nonsens/pods/gnss.hpp>
+#include <nonsens/pods/imu.hpp>
+#include <nonsens/pods/ray.hpp>
+
+#include <nonsens/sensor/gnss.hpp>
 
 namespace nonsens::sensor {
 
-    /// Base for a concrete sensor that translates between wire formats and a datapod pod.
+    enum class SensorType : dp::u8 {
+        GNSS = 0,
+        IMU = 1,
+        RAY = 2,
+        CAMERA = 3,
+    };
+
+    using Endpoint = dp::Variant<wirebit::SerialEndpoint *, wirebit::CanEndpoint *, wirebit::EthEndpoint *>;
+
+    using PodPtr = dp::Variant<nonsens::pod::Gnss *, nonsens::pod::Imu *, nonsens::pod::Ray *, nonsens::pod::Camera *>;
+
+    using PodConstPtr = dp::Variant<nonsens::pod::Gnss const *, nonsens::pod::Imu const *, nonsens::pod::Ray const *,
+                                    nonsens::pod::Camera const *>;
+
+    /// Unified runtime sensor wrapper.
     ///
-    /// The key design goal is a unified control surface (`step()`, `push()`, `pod()`), while
-    /// keeping wiring manual and sensor-specific (only the concrete sensor exposes valid
-    /// `add_input/add_output` overloads).
-    template <typename PodT> class Sensor {
+    /// This is the single type you can create/configure from external code.
+    /// Internally it wraps concrete typed sensors (currently GNSS only).
+    class Sensor {
       public:
-        using Pod = PodT;
+        static inline dp::Res<Sensor> create(SensorType type) {
+            Sensor s;
+            s.type_ = type;
 
-        virtual ~Sensor() = default;
+            switch (type) {
+            case SensorType::GNSS:
+                s.impl_ = nonsens::sensor::Gnss{};
+                return dp::Res<Sensor>::ok(std::move(s));
+            case SensorType::IMU:
+            case SensorType::RAY:
+            case SensorType::CAMERA:
+            default:
+                return dp::Res<Sensor>::err(dp::Error::invalid_argument("sensor type not implemented"));
+            }
+        }
 
-        virtual char const *name() const noexcept = 0;
+        SensorType type() const noexcept { return type_; }
 
-        Pod const &pod() const noexcept { return pod_; }
-        Pod &pod() noexcept { return pod_; }
-        void set_pod(Pod const &p) noexcept { pod_ = p; }
+        dp::String name() const {
+            return impl_.apply([](auto const &s) { return dp::String(s.name()); });
+        }
 
-        dp::VoidRes step() { return do_step(); }
-        dp::VoidRes push() { return do_push(); }
+        dp::VoidRes add_input(Endpoint ep) {
+            return impl_.apply([&](auto &s) { return ep.apply([&](auto *p) { return add_input_impl(s, p); }); });
+        }
 
-      protected:
-        virtual dp::VoidRes do_step() = 0;
-        virtual dp::VoidRes do_push() = 0;
+        dp::VoidRes add_output(Endpoint ep) {
+            return impl_.apply([&](auto &s) { return ep.apply([&](auto *p) { return add_output_impl(s, p); }); });
+        }
 
-        Pod pod_{};
+        dp::VoidRes step() {
+            return impl_.apply([](auto &s) { return s.step(); });
+        }
+        dp::VoidRes push() {
+            return impl_.apply([](auto &s) { return s.push(); });
+        }
+
+        PodPtr pod() {
+            return impl_.apply([](auto &s) -> PodPtr {
+                using S = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<S, nonsens::sensor::Gnss>) {
+                    return PodPtr{&s.pod()};
+                } else {
+                    return PodPtr{};
+                }
+            });
+        }
+
+        PodConstPtr pod() const {
+            return impl_.apply([](auto const &s) -> PodConstPtr {
+                using S = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<S, nonsens::sensor::Gnss>) {
+                    return PodConstPtr{&s.pod()};
+                } else {
+                    return PodConstPtr{};
+                }
+            });
+        }
+
+      private:
+        template <typename S> static dp::VoidRes add_input_impl(S &s, wirebit::SerialEndpoint *p) {
+            if constexpr (requires { s.add_input(*p); }) {
+                return s.add_input(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("serial input not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes add_input_impl(S &s, wirebit::CanEndpoint *p) {
+            if constexpr (requires { s.add_input(*p); }) {
+                return s.add_input(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("can input not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes add_input_impl(S &s, wirebit::EthEndpoint *p) {
+            if constexpr (requires { s.add_input(*p); }) {
+                return s.add_input(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("eth input not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes add_output_impl(S &s, wirebit::SerialEndpoint *p) {
+            if constexpr (requires { s.add_output(*p); }) {
+                return s.add_output(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("serial output not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes add_output_impl(S &s, wirebit::CanEndpoint *p) {
+            if constexpr (requires { s.add_output(*p); }) {
+                return s.add_output(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("can output not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes add_output_impl(S &s, wirebit::EthEndpoint *p) {
+            if constexpr (requires { s.add_output(*p); }) {
+                return s.add_output(*p);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("eth output not supported by this sensor"));
+            }
+        }
+
+        SensorType type_{SensorType::GNSS};
+        dp::Variant<nonsens::sensor::Gnss> impl_{};
     };
 
 } // namespace nonsens::sensor
