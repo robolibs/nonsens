@@ -11,7 +11,7 @@
 #include <nonsens/codec/gnss/pod_to_nmea.hpp>
 
 #include <nonsens/pods/gnss.hpp>
-#include <nonsens/sensor/sensor.hpp>
+#include <nonsens/sensor/sensor_base.hpp>
 
 namespace nonsens::sensor {
 
@@ -20,7 +20,7 @@ namespace nonsens::sensor {
     /// - SerialEndpoint: NMEA0183 (implemented)
     /// - CanEndpoint: J1939/ISOBUS (stub)
     /// - EthEndpoint: reserved (stub)
-    class Gnss final : public Sensor<nonsens::pod::Gnss> {
+    class Gnss final : public SensorBase<nonsens::pod::Gnss> {
       public:
         char const *name() const noexcept override { return "gnss"; }
 
