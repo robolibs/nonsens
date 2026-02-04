@@ -125,10 +125,12 @@ namespace nonsens::codec::gnss {
             }
 
             double raw = d.value();
-            int deg_width = is_lat ? 2 : 3;
-            double pow10 = std::pow(10.0, deg_width);
-            int deg = static_cast<int>(raw / pow10);
-            double min = raw - (static_cast<double>(deg) * pow10);
+
+            // ddmm.mmmm / dddmm.mmmm parsing:
+            // The minutes are always the last two digits before the decimal point.
+            // Therefore degrees = floor(raw / 100) for both latitude and longitude.
+            int deg = static_cast<int>(raw / 100.0);
+            double min = raw - (static_cast<double>(deg) * 100.0);
 
             double dec = static_cast<double>(deg) + (min / 60.0);
 

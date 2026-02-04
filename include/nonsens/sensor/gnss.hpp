@@ -6,11 +6,14 @@
 #include <wirebit/wirebit.hpp>
 
 #include <nonsens/codec/gnss/j1939_to_pod.hpp>
+#include <nonsens/codec/gnss/nmea2000_to_pod.hpp>
 #include <nonsens/codec/gnss/nmea_to_pod.hpp>
 #include <nonsens/codec/gnss/pod_to_j1939.hpp>
 #include <nonsens/codec/gnss/pod_to_nmea.hpp>
+#include <nonsens/codec/gnss/pod_to_nmea2000.hpp>
 
 #include <nonsens/pods/gnss.hpp>
+#include <nonsens/sensor/can_protocol.hpp>
 #include <nonsens/sensor/sensor_base.hpp>
 
 namespace nonsens::sensor {
@@ -23,6 +26,24 @@ namespace nonsens::sensor {
     class Gnss final : public SensorBase<nonsens::pod::Gnss> {
       public:
         char const *name() const noexcept override { return "gnss"; }
+
+        dp::VoidRes set_can_input_protocol(nonsens::sensor::CanProtocol proto) {
+            if (in_kind_ != InKind::J1939_CAN && in_kind_ != InKind::NMEA2000_CAN) {
+                return dp::VoidRes::err(
+                    dp::Error::invalid_argument("gnss can input protocol: no can input configured"));
+            }
+            in_kind_ = (proto == nonsens::sensor::CanProtocol::NMEA2000) ? InKind::NMEA2000_CAN : InKind::J1939_CAN;
+            return dp::VoidRes::ok();
+        }
+
+        dp::VoidRes set_can_output_protocol(nonsens::sensor::CanProtocol proto) {
+            if (out_kind_ != OutKind::J1939_CAN && out_kind_ != OutKind::NMEA2000_CAN) {
+                return dp::VoidRes::err(
+                    dp::Error::invalid_argument("gnss can output protocol: no can output configured"));
+            }
+            out_kind_ = (proto == nonsens::sensor::CanProtocol::NMEA2000) ? OutKind::NMEA2000_CAN : OutKind::J1939_CAN;
+            return dp::VoidRes::ok();
+        }
 
         dp::VoidRes add_input(wirebit::SerialEndpoint &ep) {
             if (has_input_) {
@@ -39,6 +60,16 @@ namespace nonsens::sensor {
                 return dp::VoidRes::err(dp::Error::already_exists("gnss input already set"));
             }
             in_kind_ = InKind::J1939_CAN;
+            can_in_ = &ep;
+            has_input_ = true;
+            return dp::VoidRes::ok();
+        }
+
+        dp::VoidRes add_input_nmea2000(wirebit::CanEndpoint &ep) {
+            if (has_input_) {
+                return dp::VoidRes::err(dp::Error::already_exists("gnss input already set"));
+            }
+            in_kind_ = InKind::NMEA2000_CAN;
             can_in_ = &ep;
             has_input_ = true;
             return dp::VoidRes::ok();
@@ -74,6 +105,16 @@ namespace nonsens::sensor {
             return dp::VoidRes::ok();
         }
 
+        dp::VoidRes add_output_nmea2000(wirebit::CanEndpoint &ep) {
+            if (has_output_) {
+                return dp::VoidRes::err(dp::Error::already_exists("gnss output already set"));
+            }
+            out_kind_ = OutKind::NMEA2000_CAN;
+            can_out_ = &ep;
+            has_output_ = true;
+            return dp::VoidRes::ok();
+        }
+
         dp::VoidRes add_output(wirebit::EthEndpoint &ep) {
             if (has_output_) {
                 return dp::VoidRes::err(dp::Error::already_exists("gnss output already set"));
@@ -87,8 +128,8 @@ namespace nonsens::sensor {
         dp::Error const &last_error() const noexcept { return last_error_; }
 
       private:
-        enum class InKind { NONE, NMEA_SERIAL, J1939_CAN, ETH };
-        enum class OutKind { NONE, NMEA_SERIAL, J1939_CAN, ETH };
+        enum class InKind { NONE, NMEA_SERIAL, J1939_CAN, NMEA2000_CAN, ETH };
+        enum class OutKind { NONE, NMEA_SERIAL, J1939_CAN, NMEA2000_CAN, ETH };
 
         dp::VoidRes do_step() override {
             if (!has_input_) {
@@ -119,6 +160,22 @@ namespace nonsens::sensor {
                     return dp::VoidRes::err(r.error());
                 }
                 auto res = nonsens::codec::gnss::j1939_to_pod(frame, pod_);
+                if (!res.is_ok())
+                    last_error_ = res.error();
+                return res;
+            }
+
+            if (in_kind_ == InKind::NMEA2000_CAN) {
+                wirebit::can_frame frame{};
+                auto r = can_in_->recv_can(frame);
+                if (!r.is_ok()) {
+                    if (r.error().code == dp::Error::TIMEOUT) {
+                        return dp::VoidRes::ok();
+                    }
+                    last_error_ = r.error();
+                    return dp::VoidRes::err(r.error());
+                }
+                auto res = nonsens::codec::gnss::nmea2000_to_pod(frame, pod_);
                 if (!res.is_ok())
                     last_error_ = res.error();
                 return res;
@@ -169,6 +226,22 @@ namespace nonsens::sensor {
 
             if (out_kind_ == OutKind::J1939_CAN) {
                 auto frames = nonsens::codec::gnss::pod_to_j1939(pod_);
+                if (!frames.is_ok()) {
+                    last_error_ = frames.error();
+                    return dp::VoidRes::err(frames.error());
+                }
+                for (auto const &f : frames.value()) {
+                    auto s = can_out_->send_can(f);
+                    if (!s.is_ok()) {
+                        last_error_ = s.error();
+                        return dp::VoidRes::err(s.error());
+                    }
+                }
+                return dp::VoidRes::ok();
+            }
+
+            if (out_kind_ == OutKind::NMEA2000_CAN) {
+                auto frames = nonsens::codec::gnss::pod_to_nmea2000(pod_, nmea2000_sid_, nmea2000_fast_seq_);
                 if (!frames.is_ok()) {
                     last_error_ = frames.error();
                     return dp::VoidRes::err(frames.error());
@@ -240,6 +313,10 @@ namespace nonsens::sensor {
 
         std::string line_buf_{};
         dp::Error last_error_{};
+
+        // NMEA2000 sequencing (Fast Packet + related messages)
+        uint8_t nmea2000_sid_{0};
+        uint8_t nmea2000_fast_seq_{0};
     };
 
 } // namespace nonsens::sensor
