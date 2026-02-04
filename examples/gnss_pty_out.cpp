@@ -5,9 +5,8 @@
 #include <memory>
 #include <thread>
 
-#include <wirebit/wirebit.hpp>
-
 #include <nonsens/nonsens.hpp>
+#include <wirebit/wirebit.hpp>
 
 int main(int argc, char **argv) {
     // Convenience path so users can point other tools at a stable filename.

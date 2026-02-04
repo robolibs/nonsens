@@ -17,8 +17,8 @@ namespace nonsens::sensor {
 
     /// GNSS sensor translator (pod in the middle).
     ///
-    /// - SerialEndpoint: NMEA0183 (implemented)
-    /// - CanEndpoint: J1939/ISOBUS (stub)
+    /// - SerialEndpoint: NMEA0183
+    /// - CanEndpoint: J1939 (PGN 0xFEF3, 0xFEE8)
     /// - EthEndpoint: reserved (stub)
     class Gnss final : public SensorBase<nonsens::pod::Gnss> {
       public:
