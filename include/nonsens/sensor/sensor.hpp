@@ -11,6 +11,7 @@
 #include <nonsens/pods/imu.hpp>
 #include <nonsens/pods/ray.hpp>
 
+#include <nonsens/sensor/can_protocol.hpp>
 #include <nonsens/sensor/gnss.hpp>
 
 namespace nonsens::sensor {
@@ -72,6 +73,14 @@ namespace nonsens::sensor {
             return impl_.apply([](auto &s) { return s.push(); });
         }
 
+        dp::VoidRes set_can_input_protocol(CanProtocol proto) {
+            return impl_.apply([&](auto &s) { return set_can_input_protocol_impl(s, proto); });
+        }
+
+        dp::VoidRes set_can_output_protocol(CanProtocol proto) {
+            return impl_.apply([&](auto &s) { return set_can_output_protocol_impl(s, proto); });
+        }
+
         PodPtr pod() {
             return impl_.apply([](auto &s) -> PodPtr {
                 using S = std::decay_t<decltype(s)>;
@@ -95,6 +104,23 @@ namespace nonsens::sensor {
         }
 
       private:
+        template <typename S> static dp::VoidRes set_can_input_protocol_impl(S &s, CanProtocol proto) {
+            if constexpr (requires { s.set_can_input_protocol(proto); }) {
+                return s.set_can_input_protocol(proto);
+            } else {
+                return dp::VoidRes::err(dp::Error::invalid_argument("can input protocol not supported by this sensor"));
+            }
+        }
+
+        template <typename S> static dp::VoidRes set_can_output_protocol_impl(S &s, CanProtocol proto) {
+            if constexpr (requires { s.set_can_output_protocol(proto); }) {
+                return s.set_can_output_protocol(proto);
+            } else {
+                return dp::VoidRes::err(
+                    dp::Error::invalid_argument("can output protocol not supported by this sensor"));
+            }
+        }
+
         template <typename S> static dp::VoidRes add_input_impl(S &s, wirebit::SerialEndpoint *p) {
             if constexpr (requires { s.add_input(*p); }) {
                 return s.add_input(*p);
