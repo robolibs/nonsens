@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.0.9] - 2026-02-04
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update wirebit dependency to 0.0.14
+
 ## [0.0.8] - 2026-02-04
 
 ### <!-- 0 -->⛰️  Features
