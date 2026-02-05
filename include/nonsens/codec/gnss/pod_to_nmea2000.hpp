@@ -135,6 +135,7 @@ namespace nonsens::codec::gnss {
         }
 
         inline dp::Res<wirebit::can_frame> encode_position_rapid(double lat_deg, double lon_deg, uint8_t sa) {
+            // Quantized at 1e-7 degrees by the PGN definition.
             int64_t lat64 = static_cast<int64_t>(std::llround(lat_deg * 1e7));
             int64_t lon64 = static_cast<int64_t>(std::llround(lon_deg * 1e7));
             int32_t lat_i =
@@ -288,8 +289,9 @@ namespace nonsens::codec::gnss {
     /// - PGN 129025 (Position Rapid Update)
     /// - PGN 129026 (COG & SOG Rapid Update)
     /// - PGN 129029 (GNSS Position Data) as Fast Packet
-    inline dp::Res<dp::Vector<wirebit::can_frame>> pod_to_nmea2000(nonsens::pod::Gnss const &in, uint8_t &sid_io,
+    inline dp::Res<dp::Vector<wirebit::can_frame>> pod_to_nmea2000(nonsens::pod::Gnss const &in, uint8_t sid,
                                                                    uint8_t &fast_packet_seq_io,
+                                                                   bool include_gnss_position,
                                                                    uint8_t sa = NMEA2000_DEFAULT_SA) {
         dp::Vector<wirebit::can_frame> frames;
 
@@ -304,25 +306,26 @@ namespace nonsens::codec::gnss {
 
         double track_deg = detail_n2k::track_deg_from_pod(in);
         double speed_mps = detail_n2k::speed_mps_from_pod(in);
-        auto cog = detail_n2k::encode_cog_sog_rapid(track_deg, speed_mps, sid_io, sa);
+        auto cog = detail_n2k::encode_cog_sog_rapid(track_deg, speed_mps, sid, sa);
         if (!cog.is_ok())
             return dp::Res<dp::Vector<wirebit::can_frame>>::err(cog.error());
         frames.push_back(cog.value());
 
-        auto payload = detail_n2k::encode_gnss_position_payload(in.latitude, in.longitude, in.altitude, sid_io);
-        if (!payload.is_ok())
-            return dp::Res<dp::Vector<wirebit::can_frame>>::err(payload.error());
+        if (include_gnss_position) {
+            auto payload = detail_n2k::encode_gnss_position_payload(in.latitude, in.longitude, in.altitude, sid);
+            if (!payload.is_ok())
+                return dp::Res<dp::Vector<wirebit::can_frame>>::err(payload.error());
 
-        uint32_t can_id = nmea2000_build_can_id(Nmea2000Pgn::GNSS_POSITION, sa, NMEA2000_PRIORITY_GNSS);
-        auto fp = detail_n2k::encode_fast_packet(can_id, payload.value(), fast_packet_seq_io);
-        if (!fp.is_ok())
-            return dp::Res<dp::Vector<wirebit::can_frame>>::err(fp.error());
+            uint32_t can_id = nmea2000_build_can_id(Nmea2000Pgn::GNSS_POSITION, sa, NMEA2000_PRIORITY_GNSS);
+            auto fp = detail_n2k::encode_fast_packet(can_id, payload.value(), fast_packet_seq_io);
+            if (!fp.is_ok())
+                return dp::Res<dp::Vector<wirebit::can_frame>>::err(fp.error());
 
-        for (auto const &f : fp.value()) {
-            frames.push_back(f);
+            for (auto const &f : fp.value()) {
+                frames.push_back(f);
+            }
         }
 
-        sid_io = static_cast<uint8_t>((sid_io + 1) % 253);
         return dp::Res<dp::Vector<wirebit::can_frame>>::ok(std::move(frames));
     }
 

@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -50,6 +51,13 @@ int main(int argc, char **argv) {
     }
     auto sensor = std::move(sres.value());
 
+    auto podv = sensor.pod();
+    auto *gnss = dp::get<nonsens::pod::Gnss *>(podv);
+    if (gnss == nullptr) {
+        std::cerr << "failed to access gnss pod\n";
+        return 1;
+    }
+
     auto in = sensor.add_input(nonsens::sensor::Endpoint{&serial});
     if (!in.is_ok()) {
         std::cerr << "failed to set input: " << in.error().message.c_str() << "\n";
@@ -61,9 +69,27 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    auto last_print = std::chrono::steady_clock::now();
     while (true) {
-        sensor.step();
-        sensor.push();
+        auto st = sensor.step();
+        if (!st.is_ok()) {
+            std::cerr << "step error: " << st.error().message.c_str() << "\n";
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_print > std::chrono::milliseconds(500)) {
+            last_print = now;
+            double t = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+            std::cout << std::fixed << std::setprecision(6) << "t=" << t << " " << std::setprecision(8)
+                      << "pod lat=" << gnss->latitude << " lon=" << gnss->longitude << " track_deg=" << gnss->track_deg
+                      << " speed_mps=" << gnss->speed_mps << "\n";
+        }
+
+        auto pu = sensor.push();
+        if (!pu.is_ok()) {
+            std::cerr << "push error: " << pu.error().message.c_str() << "\n";
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }

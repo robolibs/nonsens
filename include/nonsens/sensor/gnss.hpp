@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 
 #include <datapod/datapod.hpp>
@@ -137,15 +138,41 @@ namespace nonsens::sensor {
             }
 
             if (in_kind_ == InKind::NMEA_SERIAL) {
-                auto r = serial_in_->recv();
-                if (!r.is_ok()) {
-                    if (r.error().code == dp::Error::TIMEOUT) {
-                        return dp::VoidRes::ok();
+                // Drain the serial RX queue so we decode the most recent fix.
+                // Without this, a fast NMEA source + slow loop rate can build up backlog,
+                // causing CAN outputs to lag behind real-time.
+                auto start = std::chrono::steady_clock::now();
+                size_t total_bytes = 0;
+                bool got_any = false;
+
+                while (true) {
+                    // Bound the work per step: if the source is continuously streaming
+                    // (no gaps => no TIMEOUT), don't block the control loop forever.
+                    auto now = std::chrono::steady_clock::now();
+                    if (now - start > std::chrono::milliseconds(5)) {
+                        break;
                     }
-                    last_error_ = r.error();
-                    return dp::VoidRes::err(r.error());
+                    if (total_bytes >= 64 * 1024) {
+                        break;
+                    }
+
+                    auto r = serial_in_->recv();
+                    if (!r.is_ok()) {
+                        if (r.error().code == dp::Error::TIMEOUT) {
+                            break;
+                        }
+                        last_error_ = r.error();
+                        return dp::VoidRes::err(r.error());
+                    }
+
+                    got_any = true;
+                    total_bytes += r.value().size();
+                    append_bytes_to_line_buffer(r.value());
                 }
-                append_bytes_to_line_buffer(r.value());
+
+                if (!got_any) {
+                    return dp::VoidRes::ok();
+                }
                 return consume_lines();
             }
 
@@ -241,7 +268,16 @@ namespace nonsens::sensor {
             }
 
             if (out_kind_ == OutKind::NMEA2000_CAN) {
-                auto frames = nonsens::codec::gnss::pod_to_nmea2000(pod_, nmea2000_sid_, nmea2000_fast_seq_);
+                auto now = std::chrono::steady_clock::now();
+                bool send_gnss_position = false;
+                if (!nmea2000_gnss_sent_) {
+                    send_gnss_position = true;
+                } else if (now - nmea2000_last_gnss_tp_ >= std::chrono::seconds(1)) {
+                    send_gnss_position = true;
+                }
+
+                auto frames =
+                    nonsens::codec::gnss::pod_to_nmea2000(pod_, nmea2000_sid_, nmea2000_fast_seq_, send_gnss_position);
                 if (!frames.is_ok()) {
                     last_error_ = frames.error();
                     return dp::VoidRes::err(frames.error());
@@ -252,6 +288,11 @@ namespace nonsens::sensor {
                         last_error_ = s.error();
                         return dp::VoidRes::err(s.error());
                     }
+                }
+                if (send_gnss_position) {
+                    nmea2000_last_gnss_tp_ = now;
+                    nmea2000_gnss_sent_ = true;
+                    nmea2000_sid_ = static_cast<uint8_t>((nmea2000_sid_ + 1) % 253);
                 }
                 return dp::VoidRes::ok();
             }
@@ -293,9 +334,129 @@ namespace nonsens::sensor {
                 auto r = nonsens::codec::gnss::nmea_to_pod(sv, pod_);
                 if (!r.is_ok()) {
                     last_error_ = r.error();
+                } else {
+                    // Some sources (like flatsim) do not provide COG/SOG in RMC.
+                    // If the receiver didn't fill motion, derive it from consecutive positions.
+                    update_motion_from_position_if_needed();
                 }
             }
             return dp::VoidRes::ok();
+        }
+
+        static double deg_to_rad(double deg) { return deg * (3.14159265358979323846 / 180.0); }
+        static double rad_to_deg(double rad) { return rad * (180.0 / 3.14159265358979323846); }
+
+        static double haversine_distance_m(double lat1_deg, double lon1_deg, double lat2_deg, double lon2_deg) {
+            constexpr double R = 6371000.0;
+            double lat1 = deg_to_rad(lat1_deg);
+            double lat2 = deg_to_rad(lat2_deg);
+            double dlat = lat2 - lat1;
+            double dlon = deg_to_rad(lon2_deg - lon1_deg);
+
+            double a = std::sin(dlat * 0.5) * std::sin(dlat * 0.5) +
+                       std::cos(lat1) * std::cos(lat2) * std::sin(dlon * 0.5) * std::sin(dlon * 0.5);
+            double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(std::max(0.0, 1.0 - a)));
+            return R * c;
+        }
+
+        static double bearing_deg(double lat1_deg, double lon1_deg, double lat2_deg, double lon2_deg) {
+            double lat1 = deg_to_rad(lat1_deg);
+            double lat2 = deg_to_rad(lat2_deg);
+            double dlon = deg_to_rad(lon2_deg - lon1_deg);
+
+            double x = std::sin(dlon) * std::cos(lat2);
+            double y = std::cos(lat1) * std::sin(lat2) - std::sin(lat1) * std::cos(lat2) * std::cos(dlon);
+            double br = std::atan2(x, y);
+            double deg = std::fmod(rad_to_deg(br) + 360.0, 360.0);
+            return deg;
+        }
+
+        void update_motion_from_position_if_needed() {
+            if (pod_.status.status < nonsens::pod::Gnss::NavSatStatus::STATUS_FIX) {
+                return;
+            }
+
+            // Only synthesize if motion isn't already provided.
+            double vn = static_cast<double>(pod_.velocity_neu[0]);
+            double ve = static_cast<double>(pod_.velocity_neu[1]);
+            bool has_motion = (std::abs(vn) > 1e-6) || (std::abs(ve) > 1e-6) ||
+                              (std::abs(static_cast<double>(pod_.speed_mps)) > 1e-6) ||
+                              (std::abs(static_cast<double>(pod_.track_deg)) > 1e-6);
+            if (has_motion) {
+                return;
+            }
+
+            double lat = static_cast<double>(pod_.latitude);
+            double lon = static_cast<double>(pod_.longitude);
+            auto now = std::chrono::steady_clock::now();
+
+            if (!motion_has_prev_) {
+                motion_has_prev_ = true;
+                prev_lat_ = lat;
+                prev_lon_ = lon;
+                prev_tp_ = now;
+                return;
+            }
+
+            std::chrono::duration<double> dt = now - prev_tp_;
+            double dt_s = dt.count();
+            if (dt_s <= 0.02) {
+                return;
+            }
+
+            double dist_m = haversine_distance_m(prev_lat_, prev_lon_, lat, lon);
+            // Suppress jitter; if we moved less than ~2 cm, treat as stationary.
+            if (dist_m < 0.02) {
+                prev_lat_ = lat;
+                prev_lon_ = lon;
+                prev_tp_ = now;
+                return;
+            }
+
+            double spd = dist_m / dt_s;
+            double cog = bearing_deg(prev_lat_, prev_lon_, lat, lon);
+
+            // Convert to NE velocity, then low-pass filter velocity components.
+            // This smooths both speed and heading and avoids angle wrap issues.
+            double tr = deg_to_rad(cog);
+            double inst_vn = spd * std::cos(tr);
+            double inst_ve = spd * std::sin(tr);
+
+            // 1st order low-pass with a ~1s time constant.
+            constexpr double TAU_S = 1.0;
+            double alpha = 1.0 - std::exp(-dt_s / TAU_S);
+            alpha = std::max(0.0, std::min(1.0, alpha));
+
+            if (!motion_filter_init_) {
+                motion_filter_init_ = true;
+                filt_vn_ = inst_vn;
+                filt_ve_ = inst_ve;
+            } else {
+                filt_vn_ += alpha * (inst_vn - filt_vn_);
+                filt_ve_ += alpha * (inst_ve - filt_ve_);
+            }
+
+            double spd_f = std::sqrt(filt_vn_ * filt_vn_ + filt_ve_ * filt_ve_);
+            double cog_f = 0.0;
+            if (spd_f > 0.10) {
+                cog_f = std::atan2(filt_ve_, filt_vn_) * (180.0 / 3.14159265358979323846);
+                if (cog_f < 0.0)
+                    cog_f += 360.0;
+                last_track_deg_ = cog_f;
+            } else {
+                // Heading is meaningless near standstill; keep last stable heading.
+                cog_f = last_track_deg_;
+            }
+
+            pod_.speed_mps = spd_f;
+            pod_.track_deg = cog_f;
+            pod_.velocity_neu[0] = filt_vn_;
+            pod_.velocity_neu[1] = filt_ve_;
+            pod_.velocity_neu[2] = 0.0;
+
+            prev_lat_ = lat;
+            prev_lon_ = lon;
+            prev_tp_ = now;
         }
 
         bool has_input_{false};
@@ -317,6 +478,19 @@ namespace nonsens::sensor {
         // NMEA2000 sequencing (Fast Packet + related messages)
         uint8_t nmea2000_sid_{0};
         uint8_t nmea2000_fast_seq_{0};
+        bool nmea2000_gnss_sent_{false};
+        std::chrono::steady_clock::time_point nmea2000_last_gnss_tp_{};
+
+        // Derived motion from position (for sources that omit COG/SOG)
+        bool motion_has_prev_{false};
+        double prev_lat_{0.0};
+        double prev_lon_{0.0};
+        std::chrono::steady_clock::time_point prev_tp_{};
+
+        bool motion_filter_init_{false};
+        double filt_vn_{0.0};
+        double filt_ve_{0.0};
+        double last_track_deg_{0.0};
     };
 
 } // namespace nonsens::sensor
