@@ -141,21 +141,13 @@ namespace nonsens::sensor {
                 // Drain the serial RX queue so we decode the most recent fix.
                 // Without this, a fast NMEA source + slow loop rate can build up backlog,
                 // causing CAN outputs to lag behind real-time.
-                auto start = std::chrono::steady_clock::now();
+                constexpr size_t MAX_BYTES_PER_STEP = 256 * 1024;
+                constexpr int MAX_READS_PER_STEP = 1024;
+
                 size_t total_bytes = 0;
                 bool got_any = false;
 
-                while (true) {
-                    // Bound the work per step: if the source is continuously streaming
-                    // (no gaps => no TIMEOUT), don't block the control loop forever.
-                    auto now = std::chrono::steady_clock::now();
-                    if (now - start > std::chrono::milliseconds(5)) {
-                        break;
-                    }
-                    if (total_bytes >= 64 * 1024) {
-                        break;
-                    }
-
+                for (int i = 0; i < MAX_READS_PER_STEP && total_bytes < MAX_BYTES_PER_STEP; ++i) {
                     auto r = serial_in_->recv();
                     if (!r.is_ok()) {
                         if (r.error().code == dp::Error::TIMEOUT) {
