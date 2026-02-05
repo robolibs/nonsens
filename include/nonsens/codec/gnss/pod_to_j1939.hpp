@@ -81,9 +81,13 @@ namespace nonsens::codec::gnss {
         double lat_raw_d = (lat_deg + 210.0) / 1e-7;
         double lon_raw_d = (lon_deg + 210.0) / 1e-7;
 
-        // Clamp to uint32 range
-        uint32_t lat_raw = static_cast<uint32_t>(std::max(0.0, std::min(4294967295.0, lat_raw_d)));
-        uint32_t lon_raw = static_cast<uint32_t>(std::max(0.0, std::min(4294967295.0, lon_raw_d)));
+        // Round to nearest representable tick (1e-7 deg) then clamp to uint32 range.
+        int64_t lat_raw_i = static_cast<int64_t>(std::llround(lat_raw_d));
+        int64_t lon_raw_i = static_cast<int64_t>(std::llround(lon_raw_d));
+        lat_raw_i = std::max<int64_t>(0, std::min<int64_t>(4294967295LL, lat_raw_i));
+        lon_raw_i = std::max<int64_t>(0, std::min<int64_t>(4294967295LL, lon_raw_i));
+        uint32_t lat_raw = static_cast<uint32_t>(lat_raw_i);
+        uint32_t lon_raw = static_cast<uint32_t>(lon_raw_i);
 
         // Pack as little-endian
         uint8_t data[8];

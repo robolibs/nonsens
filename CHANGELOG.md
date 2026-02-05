@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.0.10] - 2026-02-05
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Improve GNSS sensor and NMEA2000 output
+
 ## [0.0.9] - 2026-02-04
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
