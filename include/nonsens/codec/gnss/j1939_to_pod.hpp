@@ -50,13 +50,6 @@ namespace nonsens::codec::gnss {
             return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 0) | (static_cast<uint16_t>(p[1]) << 8));
         }
 
-        inline void update_velocity_from_track_speed(nonsens::pod::Gnss &out) {
-            double tr = static_cast<double>(out.track_deg) * (M_PI / 180.0);
-            out.velocity_neu[0] = static_cast<double>(out.speed_mps) * std::cos(tr);
-            out.velocity_neu[1] = static_cast<double>(out.speed_mps) * std::sin(tr);
-            out.velocity_neu[2] = 0.0;
-        }
-
     } // namespace detail
 
     /// Update a GNSS pod from a single SAE J1939 CAN frame.
@@ -113,8 +106,6 @@ namespace nonsens::codec::gnss {
                 double kmh = static_cast<double>(speed_raw) / 256.0;
                 out.speed_mps = kmh / 3.6;
             }
-
-            detail::update_velocity_from_track_speed(out);
 
             out.status.status = nonsens::pod::Gnss::NavSatStatus::STATUS_FIX;
             out.status.service = nonsens::pod::Gnss::NavSatStatus::SERVICE_GPS;

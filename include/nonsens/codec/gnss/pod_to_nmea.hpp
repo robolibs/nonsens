@@ -94,29 +94,9 @@ namespace nonsens::codec::gnss {
             }
         }
 
-        inline double speed_mps_from_pod(nonsens::pod::Gnss const &in) {
-            if (in.speed_mps > 0.0) {
-                return static_cast<double>(in.speed_mps);
-            }
-            double vn = static_cast<double>(in.velocity_neu[0]);
-            double ve = static_cast<double>(in.velocity_neu[1]);
-            return std::sqrt(vn * vn + ve * ve);
-        }
+        inline double speed_mps_from_pod(nonsens::pod::Gnss const &in) { return static_cast<double>(in.speed_mps); }
 
-        inline double track_deg_from_pod(nonsens::pod::Gnss const &in) {
-            if (in.track_deg != 0.0) {
-                return static_cast<double>(in.track_deg);
-            }
-            double vn = static_cast<double>(in.velocity_neu[0]);
-            double ve = static_cast<double>(in.velocity_neu[1]);
-            if (vn == 0.0 && ve == 0.0) {
-                return 0.0;
-            }
-            double tr = std::atan2(ve, vn) * (180.0 / M_PI);
-            if (tr < 0.0)
-                tr += 360.0;
-            return tr;
-        }
+        inline double track_deg_from_pod(nonsens::pod::Gnss const &in) { return static_cast<double>(in.track_deg); }
 
     } // namespace detail
 

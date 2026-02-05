@@ -312,12 +312,6 @@ namespace nonsens::codec::gnss {
                 }
             }
 
-            // Derive NEU velocity from speed+track.
-            double tr = out.track_deg * (M_PI / 180.0);
-            out.velocity_neu[0] = out.speed_mps * std::cos(tr);
-            out.velocity_neu[1] = out.speed_mps * std::sin(tr);
-            out.velocity_neu[2] = 0.0;
-
             return dp::VoidRes::ok();
         }
 

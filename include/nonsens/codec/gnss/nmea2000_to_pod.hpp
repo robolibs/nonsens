@@ -62,13 +62,6 @@ namespace nonsens::codec::gnss {
             return static_cast<int64_t>(u);
         }
 
-        inline void update_velocity_from_track_speed(nonsens::pod::Gnss &out) {
-            double tr = static_cast<double>(out.track_deg) * (M_PI / 180.0);
-            out.velocity_neu[0] = static_cast<double>(out.speed_mps) * std::cos(tr);
-            out.velocity_neu[1] = static_cast<double>(out.speed_mps) * std::sin(tr);
-            out.velocity_neu[2] = 0.0;
-        }
-
         inline void set_fix(nonsens::pod::Gnss &out) {
             out.status.status = nonsens::pod::Gnss::NavSatStatus::STATUS_FIX;
             out.status.service = nonsens::pod::Gnss::NavSatStatus::SERVICE_GPS;
@@ -173,7 +166,6 @@ namespace nonsens::codec::gnss {
             double cog_rad = static_cast<double>(cog_scaled) * 0.0001;
             out.track_deg = cog_rad * (180.0 / M_PI);
             out.speed_mps = static_cast<double>(sog_scaled) * 0.01;
-            detail_n2k::update_velocity_from_track_speed(out);
             detail_n2k::set_fix(out);
             return dp::VoidRes::ok();
         }
